@@ -1,0 +1,223 @@
+- name: Git and GitHub CLI Configuration
+  hosts: localhost
+  connection: local
+  become: false
+  
+  vars:
+    git_user_name: ""
+    git_user_email: ""
+    git_default_branch: "main"
+
+  pre_tasks:
+    - name: Check if Running in Test Environment
+      stat:
+        path: /.dockerenv
+      register: docker_check
+      tags: ['always']
+
+    - name: Environment Check
+      block:
+        - name: Check Required Variables
+          fail:
+            msg: |
+              ❌ Missing or invalid variables:
+              {% if not git_user_name %}
+              - git_user_name must be defined
+              {% endif %}
+              {% if not git_user_email %}
+              - git_user_email must be defined
+              {% endif %}
+              
+              These variables must be defined in git_vars.yml file or passed as command line arguments.
+          when: not git_user_name or not git_user_email
+
+        - name: Check Internet Connection
+          command: ping -c 1 github.com
+          changed_when: false
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: "❌ Error during environment check. Please check your Internet connection."
+      tags: ['always']
+
+  tasks:
+    # 📌 GitHub CLI Installation and Configuration
+    - name: Skip GitHub CLI Tasks in Test Environment
+      block:
+        - name: Display Skip Message
+          debug:
+            msg: "⚠️ Skipping GitHub CLI installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['gh', 'install']
+
+    - name: GitHub CLI Installation Tasks
+      block:
+        - name: Check if GitHub CLI is Installed
+          command: which gh
+          register: gh_installed
+          ignore_errors: true
+
+        - name: Install GitHub CLI via Homebrew
+          homebrew:
+            name: gh
+            state: present
+          when: gh_installed.rc != 0
+      when: not docker_check.stat.exists
+      tags: ['gh', 'install']
+
+    # 📌 Git Configuration
+    - name: Basic Git Configuration
+      git_config:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        scope: global
+      loop:
+        - { name: "user.name", value: "{{ git_user_name }}" }
+        - { name: "user.email", value: "{{ git_user_email }}" }
+        - { name: "core.editor", value: "vim" }
+        - { name: "init.defaultBranch", value: "{{ git_default_branch }}" }
+        - { name: "pull.rebase", value: "true" }
+        - { name: "push.default", value: "current" }
+        - { name: "color.ui", value: "auto" }
+        - { name: "core.autocrlf", value: "input" }
+      tags: ['git', 'config']
+      register: git_config_result
+      ignore_errors: false
+
+    - name: Verify Basic Git Configuration
+      fail:
+        msg: "❌ Error during basic Git configuration. Check permissions and provided values."
+      when: git_config_result is failed
+      tags: ['git', 'config']
+
+    - name: Advanced Git Configuration
+      git_config:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        scope: global
+      loop:
+        - { name: "help.autocorrect", value: "1" }
+        - { name: "core.excludesfile", value: "~/.gitignore_global" }
+        - { name: "merge.ff", value: "only" }
+        - { name: "fetch.prune", value: "true" }
+      tags: ['git', 'config']
+
+    # 📌 Git Aliases Configuration
+    - name: Configure Git Aliases
+      git_config:
+        name: "alias.{{ item.name }}"
+        value: "{{ item.value }}"
+        scope: global
+      loop:
+        - { name: "st", value: "status" }
+        - { name: "co", value: "checkout" }
+        - { name: "br", value: "branch" }
+        - { name: "ci", value: "commit" }
+        - { name: "unstage", value: "reset HEAD --" }
+        - { name: "last", value: "log -1 HEAD" }
+        - { name: "lg", value: "log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit" }
+      tags: ['git', 'aliases']
+
+    # 📌 SSH Keys Configuration
+    - name: SSH Configuration
+      block:
+        - name: Create .ssh Directory
+          file:
+            path: "~/.ssh"
+            state: directory
+            mode: '0700'
+
+        - name: Check SSH Key Existence
+          stat:
+            path: "~/.ssh/id_ed25519"
+          register: ssh_key
+
+        - name: Generate New Ed25519 SSH Key
+          command: ssh-keygen -t ed25519 -C "{{ git_user_email }}" -f ~/.ssh/id_ed25519 -N ""
+          when: not ssh_key.stat.exists
+      tags: ['ssh']
+
+    # 📌 GitHub CLI Configuration
+    - name: GitHub CLI Configuration
+      block:
+        - name: Check GitHub CLI Authentication Status
+          command: gh auth status
+          register: gh_auth_check
+          ignore_errors: true
+          changed_when: false
+
+        - name: Launch GitHub CLI Authentication
+          command: >
+            osascript -e 'tell application "Terminal"
+              do script "echo \"🔐 Please follow the instructions to connect to GitHub...\"; gh auth login --git-protocol=ssh --web; exit"
+              activate
+            end tell'
+          when: gh_auth_check.rc != 0
+
+        - name: Wait for GitHub Authentication
+          command: gh auth status
+          register: gh_auth_check_final
+          until: gh_auth_check_final.rc == 0
+          retries: 60
+          delay: 5
+          when: gh_auth_check.rc != 0
+      when: not docker_check.stat.exists
+      tags: ['gh', 'auth']
+
+    - name: Skip GitHub CLI Configuration in Test Environment
+      debug:
+        msg: "⚠️ Skipping GitHub CLI configuration in test environment"
+      when: docker_check.stat.exists
+      tags: ['gh', 'auth']
+
+    # 📌 Final Verification
+    - name: Verify Final Configuration
+      block:
+        - name: Check if in Test Environment
+          debug:
+            msg: "⚠️ Running in test environment - skipping GitHub CLI checks"
+          when: docker_check.stat.exists
+
+        - name: Test SSH Connection to GitHub
+          command: ssh -T git@github.com
+          register: ssh_test
+          changed_when: false
+          failed_when: ssh_test.rc != 0 and "successfully authenticated" not in ssh_test.stderr
+          when: not docker_check.stat.exists
+
+        - name: Check GitHub CLI Authentication
+          command: gh auth status
+          register: gh_final_check
+          changed_when: false
+          when: not docker_check.stat.exists
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: |
+              ❌ Configuration is incomplete. Please check:
+              1. Your Internet Connection
+              2. Your GitHub Credentials
+              3. Your SSH Configuration
+              
+              Error Details:
+              SSH Test: {{ ssh_test.stderr if ssh_test is defined else 'Not tested' }}
+              GitHub CLI: {{ gh_final_check.stderr if gh_final_check is defined else 'Not tested' }}
+      tags: ['verify']
+
+    - name: Display Success Message
+      debug:
+        msg: |
+          ✅ Git and GitHub Configuration completed successfully!
+          👤 Git User: {{ git_user_name }}
+          📧 Git Email: {{ git_user_email }}
+          🔑 SSH configured and functional
+          {% if not docker_check.stat.exists %}
+          🔒 GitHub CLI authenticated
+          {% else %}
+          ⚠️ Running in test environment - GitHub CLI configuration skipped
+          {% endif %}
+          ⚙️ Git Configuration applied
+      when: >
+        (not docker_check.stat.exists and ssh_test is success and gh_final_check is success) or
+        (docker_check.stat.exists)
+      tags: ['verify']

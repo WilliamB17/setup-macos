@@ -1,0 +1,55 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base"
+  ],
+  "enabledManagers": ["regex"],
+  "ignorePaths": [],
+  "gitAuthor": "Renovate Bot <bot@renovateapp.com>",
+  "schedule": ["every weekend"],
+  "regexManagers": [
+    {
+      "fileMatch": ["^playbooks/04-languages\\.yml$"],
+      "matchStrings": [
+        "(?<depName>erlang):\\s*versions:\\s*\\[\\\\?\"(?<currentValue>[^\\\"]+)\\\\?\"]\\s*default:\\s*\\\\?\"[^\\\"]+\\\\?\"",
+        "(?<depName>elixir):\\s*versions:\\s*\\[\\\\?\"(?<currentValue>[^\\\"]+)\\\\?\"]\\s*default:\\s*\\\\?\"[^\\\"]+\\\\?\"",
+        "(?<depName>ruby):\\s*versions:\\s*\\[\\\\?\"(?<currentValue>[^\\\"]+)\\\\?\"]\\s*default:\\s*\\\\?\"[^\\\"]+\\\\?\"",
+        "(?<depName>nodejs):\\s*versions:\\s*\\[\\\\?\"(?<currentValue>[^\\\"]+)\\\\?\"]\\s*default:\\s*\\\\?\"[^\\\"]+\\\\?\"",
+        "(?<depName>golang):\\s*versions:\\s*\\[\\\\?\"(?<currentValue>[^\\\"]+)\\\\?\"]\\s*default:\\s*\\\\?\"[^\\\"]+\\\\?\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "{{{depName}}}",
+      "packageNameTemplate": "{{#if (equals depName 'erlang')}}erlang/otp{{else if (equals depName 'elixir')}}elixir-lang/elixir{{else if (equals depName 'ruby')}}ruby/ruby{{else if (equals depName 'nodejs')}}nodejs/node{{else if (equals depName 'golang')}}golang/go{{/if}}",
+      "extractVersionTemplate": "^v?(?<version>.*)$",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["erlang/otp"],
+      "extractVersion": "^OTP-(?<version>.*)$"
+    }
+  ],
+  "hostRules": [
+    {
+      "hostType": "github",
+      "matchHost": "api.github.com",
+      "token": "${MEND_GITHUB_TOKEN}"
+    },
+    {
+      "hostType": "github",
+      "matchHost": "github.com",
+      "token": "${MEND_GITHUB_COM_TOKEN}"
+    }
+  ],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "labels": ["dependencies"],
+  "assignees": ["WilliamB17"],
+  "reviewers": ["WilliamB17"],
+  "commitMessagePrefix": "⬆️ ",
+  "commitMessageAction": "Update",
+  "commitMessageTopic": "{{depName}}",
+  "commitMessageExtra": "to {{newVersion}}",
+  "prBodyTemplate": "🤖 This PR was created by Renovate to update {{depName}} from {{currentVersion}} to {{newVersion}}.\n\n## Changes\n\n{{#if releases.length}}\n{{#each releases}}\n### {{version}}\n\n{{#if body}}\n{{{body}}}\n{{/if}}\n{{/each}}\n{{/if}}\n\nPlease review the changes and merge if appropriate."
+}

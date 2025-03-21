@@ -1,0 +1,264 @@
+- name: Homebrew and Development Tools Configuration
+  hosts: localhost
+  connection: local
+  become: false
+
+  pre_tasks:
+    - name: Environment Check
+      block:
+        - name: Check Internet Connection
+          command: ping -c 1 github.com
+          changed_when: false
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: "❌ No Internet connection. Cannot continue."
+      tags: ['always']
+
+  tasks:
+    # 📌 Prerequisites Installation
+    - name: Check if Running in Test Environment
+      stat:
+        path: /.dockerenv
+      register: docker_check
+      tags: ['always']
+
+    - name: Install Xcode Command Line Tools
+      command: xcode-select --install
+      register: xcode_result
+      failed_when: xcode_result.rc not in [0, 1]
+      changed_when: false
+      when: not docker_check.stat.exists
+      tags: ['xcode']
+
+    - name: Skip Xcode Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Xcode installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['xcode']
+
+    # 📌 Homebrew Installation and Configuration
+    - name: Check if Homebrew is Installed
+      stat:
+        path: /opt/homebrew/bin/brew
+      register: brew_check
+      tags: ['brew', 'install']
+
+    - name: Install Homebrew
+      shell: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      when: >
+        not docker_check.stat.exists and
+        (brew_check.stat is defined and not brew_check.stat.exists)
+      tags: ['brew', 'install']
+
+    - name: Skip Homebrew Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Homebrew installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['brew', 'install']
+
+    - name: Update Homebrew
+      command: brew update --force
+      register: brew_update
+      failed_when: brew_update.rc != 0
+      when: not docker_check.stat.exists
+      tags: ['brew', 'update']
+
+    - name: Skip Homebrew Update in Test Environment
+      debug:
+        msg: "⚠️ Skipping Homebrew update in test environment"
+      when: docker_check.stat.exists
+      tags: ['brew', 'update']
+
+    # 📌 Development Tools Installation
+    - name: Install Development Tools
+      homebrew:
+        name:
+          - git
+          - gh
+          - watchman
+          - yarn
+          - openssl
+          - libyaml
+          - mise
+        state: present
+      when: not docker_check.stat.exists
+      tags: ['dev', 'tools']
+
+    - name: Skip Development Tools Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Development Tools installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['dev', 'tools']
+
+    # 📌 CLI Utilities Installation
+    - name: Install CLI Utilities
+      homebrew:
+        name:
+          - jq
+          - yq
+          - gawk
+          - gnu-sed
+          - coreutils
+          - parallel
+          - zoxide
+          - spaceship
+          - fzf
+          - ripgrep
+          - fd
+          - procs
+          - sd
+          - tree
+          - bat
+          - nmap
+          - ncdu
+        state: present
+      when: not docker_check.stat.exists
+      tags: ['cli', 'tools']
+
+    - name: Skip CLI Utilities Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping CLI Utilities installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['cli', 'tools']
+
+    # 📌 Kubernetes Tools Installation
+    - name: Install Kubernetes Tools
+      homebrew:
+        name:
+          - kubectl
+          - kubectx
+          - helm
+          - k9s
+        state: present
+      when: not docker_check.stat.exists
+      tags: ['k8s', 'tools']
+
+    - name: Skip Kubernetes Tools Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Kubernetes Tools installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['k8s', 'tools']
+
+    # 📌 Infrastructure Tools Installation
+    - name: Install Infrastructure Tools
+      homebrew:
+        name:
+          - terraform
+          - sops
+        state: present
+      when: not docker_check.stat.exists
+      tags: ['infra', 'tools']
+
+    - name: Skip Infrastructure Tools Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Infrastructure Tools installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['infra', 'tools']
+
+    # 📌 Applications Installation
+    - name: Install Applications
+      block:
+        - name: Check OrbStack Installation
+          command: brew list orbstack
+          register: orbstack_installed
+          ignore_errors: true
+          failed_when: false
+
+        - name: Install OrbStack
+          homebrew:
+            name: orbstack
+            state: present
+          when: orbstack_installed.rc != 0
+
+        - name: Check iTerm2 Installation
+          command: brew list --cask iterm2
+          register: iterm2_installed
+          ignore_errors: true
+          failed_when: false
+
+        - name: Install iTerm2
+          homebrew_cask:
+            name: iterm2
+            state: present
+          when: iterm2_installed.rc != 0
+
+        - name: Check VS Code Installation
+          command: brew list --cask visual-studio-code
+          register: vscode_installed
+          ignore_errors: true
+          failed_when: false
+
+        - name: Install VS Code
+          homebrew_cask:
+            name: visual-studio-code
+            state: present
+          when: vscode_installed.rc != 0
+      when: not docker_check.stat.exists
+      tags: ['apps']
+
+    - name: Skip Applications Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Applications installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['apps']
+
+    # 📌 Cleanup
+    - name: Clean Unused Homebrew Packages
+      command: brew cleanup
+      register: brew_cleanup
+      failed_when: brew_cleanup.rc != 0
+      when: not docker_check.stat.exists
+      tags: ['brew', 'cleanup']
+
+    - name: Skip Homebrew Cleanup in Test Environment
+      debug:
+        msg: "⚠️ Skipping Homebrew cleanup in test environment"
+      when: docker_check.stat.exists
+      tags: ['brew', 'cleanup']
+
+    # 📌 Final Verification
+    - name: Verify Final Configuration
+      block:
+        - name: Check if in Test Environment
+          debug:
+            msg: "⚠️ Running in test environment - skipping version checks"
+          when: docker_check.stat.exists
+
+        - name: Check Tool Versions
+          block:
+            - name: Check Homebrew Installation
+              command: which brew
+              changed_when: false
+
+            - name: Check Main Tools Versions
+              command: "{{ item }} {{ '--version' if item != 'kubectl' else 'version --client' }}"
+              loop:
+                - git
+                - kubectl
+                - terraform
+              changed_when: false
+          when: not docker_check.stat.exists
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: |
+              ❌ Configuration is incomplete. Please check:
+              1. Homebrew Installation
+              2. Main Tools Installation
+              3. Applications Installation
+      tags: ['verify']
+
+    - name: Display Success Message
+      debug:
+        msg: |
+          ✅ Configuration completed successfully!
+          {% if docker_check.stat.exists %}
+          ⚠️ Running in test environment - some installations were skipped
+          {% else %}
+          🍺 Homebrew is installed and updated
+          🛠️ Development tools installed
+          📱 Applications installed
+          🧹 Cleanup completed
+          {% endif %}
+      tags: ['verify']

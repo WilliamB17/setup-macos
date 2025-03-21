@@ -1,0 +1,4 @@
+# Default Git configuration for test environment
+git_user_name: "Test User"
+git_user_email: "test@example.com"
+git_default_branch: "main" 

@@ -1,0 +1,235 @@
+- name: ZSH and iTerm2 Configuration
+  hosts: localhost
+  connection: local
+  become: false
+
+  vars:
+    ansible_user: "{{ lookup('env', 'USER') | default('testuser', true) }}"
+    zsh_plugins:
+      - git
+      - z
+      - kubectl
+      - terraform
+      - docker
+      - zsh-autosuggestions
+      - zsh-syntax-highlighting
+      - history-substring-search
+      - aws
+      - macos
+
+  pre_tasks:
+    - name: Check if Running in Test Environment
+      stat:
+        path: /.dockerenv
+      register: docker_check
+      tags: ['always']
+
+    - name: Set User for Test Environment
+      set_fact:
+        ansible_user: "testuser"
+      when: docker_check.stat.exists
+      tags: ['always']
+
+    - name: Environment Check
+      block:
+        - name: Check User Existence
+          command: id {{ ansible_user }}
+          changed_when: false
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: "❌ User {{ ansible_user }} does not exist"
+      tags: ['always']
+
+  tasks:
+    # 📌 Oh-My-Zsh Installation and Configuration
+    - name: Check if Oh-My-Zsh is Installed
+      stat:
+        path: ~/.oh-my-zsh
+      register: ohmyzsh_installed
+      tags: ['zsh', 'install']
+
+    - name: Install Oh-My-Zsh if Not Present
+      shell: |
+        sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+      when: not ohmyzsh_installed.stat.exists
+      register: omz_install
+      failed_when: omz_install.rc != 0 and not 'already installed' in omz_install.stderr
+      tags: ['zsh', 'install']
+
+    # 📌 ZSH Plugins Installation
+    - name: Create Custom Plugins Directory
+      file:
+        path: ~/.oh-my-zsh/custom/plugins
+        state: directory
+        mode: '0755'
+      tags: ['zsh', 'plugins']
+
+    - name: Install ZSH Plugins
+      git:
+        repo: "https://github.com/zsh-users/{{ item }}"
+        dest: "~/.oh-my-zsh/custom/plugins/{{ item }}"
+        depth: 1
+        version: master
+      loop:
+        - zsh-autosuggestions
+        - zsh-syntax-highlighting
+      tags: ['zsh', 'plugins']
+
+    # 📌 Powerlevel10k Installation and Configuration
+    - name: Install Powerlevel10k
+      git:
+        repo: https://github.com/romkatv/powerlevel10k.git
+        dest: ~/.oh-my-zsh/custom/themes/powerlevel10k
+        depth: 1
+        version: master
+      tags: ['zsh', 'theme']
+
+    - name: Configure ZSH
+      block:
+        - name: Configure Powerlevel10k Theme
+          lineinfile:
+            path: ~/.zshrc
+            regexp: '^ZSH_THEME='
+            line: 'ZSH_THEME="powerlevel10k/powerlevel10k"'
+
+        - name: Configure ZSH Plugins
+          lineinfile:
+            path: ~/.zshrc
+            regexp: '^plugins=\('
+            line: "plugins=({{ zsh_plugins | join(' ') }})"
+      tags: ['zsh', 'config']
+
+    - name: Set ZSH as Default Shell
+      user:
+        name: "{{ ansible_user }}"
+        shell: /bin/zsh
+      tags: ['zsh', 'config']
+
+    # 📌 Fonts and iTerm2 Configuration
+    - name: Install Powerline Fonts
+      homebrew_cask:
+        name: 
+          - font-hack-nerd-font
+          - font-fira-code-nerd-font
+        state: present
+      when: not docker_check.stat.exists
+      tags: ['iterm', 'fonts']
+
+    - name: Skip Powerline Fonts Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping Powerline fonts installation in test environment"
+      when: docker_check.stat.exists
+      tags: ['iterm', 'fonts']
+
+    - name: Install and Configure iTerm2
+      block:
+        - name: Install iTerm2
+          homebrew_cask:
+            name: iterm2
+            state: present
+
+        - name: Install iTerm2 Shell Integration
+          shell: |
+            curl -L https://iterm2.com/shell_integration/install_shell_integration.sh | bash
+          args:
+            creates: ~/.iterm2_shell_integration.zsh
+
+        - name: Configure iTerm2 Preferences
+          shell: |
+            defaults write com.googlecode.iterm2 PreferencesVersion -int 3
+            defaults write com.googlecode.iterm2 LoadPrefsFromCustomFolder -bool true
+            defaults write com.googlecode.iterm2 "New Bookmarks" -dict-add "Normal Font" "FiraCodeNFM-Reg 12"
+            defaults write com.googlecode.iterm2 PromptOnQuit -bool false
+            defaults write com.googlecode.iterm2 WindowStyle -int 0
+            defaults write com.googlecode.iterm2 UseLionStyleFullscreen -bool true
+          args:
+            creates: ~/.iterm2_configured
+      when: not docker_check.stat.exists
+      tags: ['iterm']
+
+    - name: Skip iTerm2 Installation in Test Environment
+      debug:
+        msg: "⚠️ Skipping iTerm2 installation and configuration in test environment"
+      when: docker_check.stat.exists
+      tags: ['iterm']
+
+    # 📌 Advanced ZSH Configuration
+    - name: Add Additional ZSH Configurations
+      blockinfile:
+        path: ~/.zshrc
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - ZSH CONFIGURATIONS"
+        block: |
+          # Enhanced History
+          HISTSIZE=50000
+          SAVEHIST=50000
+          setopt EXTENDED_HISTORY
+          setopt HIST_EXPIRE_DUPS_FIRST
+          setopt HIST_IGNORE_DUPS
+          setopt HIST_IGNORE_SPACE
+          setopt HIST_VERIFY
+          
+          # Enhanced Completion
+          zstyle ':completion:*' menu select
+          zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+          
+          # Useful Aliases
+          alias ll='ls -la'
+          alias zshconfig='code ~/.zshrc'
+          alias ohmyzsh='code ~/.oh-my-zsh'
+          
+          # Default Editor Configuration
+          export EDITOR='code'
+          export VISUAL='code'
+
+          # Mise Configuration
+          eval "$(mise activate zsh)"
+      tags: ['zsh', 'config']
+
+    # 📌 Final Verification
+    - name: Verify Final Configuration
+      block:
+        - name: Check if in Test Environment
+          debug:
+            msg: "⚠️ Running in test environment - skipping iTerm2 checks"
+          when: docker_check.stat.exists
+
+        - name: Check ZSH Installation
+          command: which zsh
+          changed_when: false
+
+        - name: Check Oh-My-Zsh Installation
+          stat:
+            path: ~/.oh-my-zsh
+          register: omz_check
+
+        - name: Check iTerm2 Installation
+          command: brew list --cask iterm2
+          changed_when: false
+          when: not docker_check.stat.exists
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: |
+              ❌ Configuration is incomplete. Please check:
+              1. ZSH Installation
+              2. Oh-My-Zsh Installation
+              {% if not docker_check.stat.exists %}
+              3. iTerm2 Installation
+              {% endif %}
+      tags: ['verify']
+
+    - name: Display Success Message
+      debug:
+        msg: |
+          ✅ ZSH and iTerm2 Configuration completed successfully!
+          👤 Default Shell: ZSH
+          🎨 Theme: Powerlevel10k
+          🔌 Installed Plugins: {{ zsh_plugins | join(', ') }}
+          {% if not docker_check.stat.exists %}
+          📱 iTerm2 Configured
+          {% else %}
+          ⚠️ Running in test environment - iTerm2 configuration skipped
+          {% endif %}
+      when: omz_check.stat.exists
+      tags: ['verify']

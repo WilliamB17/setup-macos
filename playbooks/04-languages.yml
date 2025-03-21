@@ -1,0 +1,174 @@
+- name: Programming Languages Configuration
+  hosts: localhost
+  connection: local
+  become: false
+
+  vars:
+    languages:
+      erlang:
+        versions: ["26.2.1"]
+        default: "26.2.1"
+      elixir:
+        versions: ["1.16.0"]
+        default: "1.16.0"
+      ruby:
+        versions: ["3.3.0"]
+        default: "3.3.0"
+      nodejs:
+        versions: ["20.11.0"]
+        default: "20.11.0"
+      golang:
+        versions: ["1.22.0"]
+        default: "1.22.0"
+
+  pre_tasks:
+    - name: Check if Running in Test Environment
+      stat:
+        path: /.dockerenv
+      register: docker_check
+      tags: ['always']
+
+    - name: Environment Check
+      block:
+        - name: Check Internet Connection
+          command: ping -c 1 github.com
+          changed_when: false
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: "❌ No Internet connection. Cannot continue."
+      tags: ['always']
+
+  tasks:
+    # 📌 Mise Configuration
+    - name: Configure Mise
+      block:
+        - name: Create Mise Config Directory
+          file:
+            path: ~/.config/mise
+            state: directory
+            mode: '0755'
+
+        - name: Create Mise Config File
+          copy:
+            dest: ~/.config/mise/config.toml
+            content: |
+              [settings]
+              activate_aggressive = true
+              always_keep_download = true
+              always_keep_install = true
+              legacy_version_file = true
+              jobs = 4
+              verbose = false
+
+              [tools]
+              erlang = "{{ languages.erlang.default }}"
+              elixir = "{{ languages.elixir.default }}"
+              ruby = "{{ languages.ruby.default }}"
+              nodejs = "{{ languages.nodejs.default }}"
+              golang = "{{ languages.golang.default }}"
+      tags: ['config']
+
+    # �� Install Languages
+    - name: Install Erlang Versions
+      command: "mise install erlang@{{ item }}"
+      loop: "{{ languages.erlang.versions }}"
+      tags: ['erlang']
+
+    - name: Install Elixir Versions
+      command: "mise install elixir@{{ item }}"
+      loop: "{{ languages.elixir.versions }}"
+      tags: ['elixir']
+
+    - name: Install Ruby Versions
+      command: "mise install ruby@{{ item }}"
+      loop: "{{ languages.ruby.versions }}"
+      tags: ['ruby']
+
+    - name: Install Node.js Versions
+      command: "mise install nodejs@{{ item }}"
+      loop: "{{ languages.nodejs.versions }}"
+      tags: ['nodejs']
+
+    - name: Install Golang Versions
+      command: "mise install golang@{{ item }}"
+      loop: "{{ languages.golang.versions }}"
+      tags: ['golang']
+
+    # 📌 Install Global Tools
+    - name: Install Global Elixir Tools
+      command: "mise exec elixir@{{ languages.elixir.default }} -- mix local.hex --force"
+      tags: ['elixir', 'tools']
+
+    - name: Install Global Ruby Tools
+      command: "mise exec ruby@{{ languages.ruby.default }} -- gem install bundler"
+      tags: ['ruby', 'tools']
+
+    - name: Install Global Node.js Tools
+      command: "mise exec nodejs@{{ languages.nodejs.default }} -- npm install -g yarn pnpm"
+      tags: ['nodejs', 'tools']
+
+    - name: Install Global Golang Tools
+      command: "mise exec golang@{{ languages.golang.default }} -- go install golang.org/x/tools/gopls@latest"
+      tags: ['golang', 'tools']
+
+    # 📌 Final Verification
+    - name: Verify Language Installations
+      block:
+        - name: Check Erlang Installation
+          command: mise exec erlang -- erl -eval '{ok, Version} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:fwrite(Version), halt().' -noshell
+          register: erlang_version
+          changed_when: false
+
+        - name: Check Elixir Installation
+          command: mise exec elixir -- elixir --version
+          register: elixir_version
+          changed_when: false
+
+        - name: Check Ruby Installation
+          command: mise exec ruby -- ruby --version
+          register: ruby_version
+          changed_when: false
+
+        - name: Check Node.js Installation
+          command: mise exec nodejs -- node --version
+          register: nodejs_version
+          changed_when: false
+
+        - name: Check Golang Installation
+          command: mise exec golang -- go version
+          register: golang_version
+          changed_when: false
+
+      rescue:
+        - name: Display Error Message
+          fail:
+            msg: |
+              ❌ Language installation verification failed. Please check:
+              1. Erlang: {{ erlang_version.stdout if erlang_version.stdout is defined else 'Failed' }}
+              2. Elixir: {{ elixir_version.stdout if elixir_version.stdout is defined else 'Failed' }}
+              3. Ruby: {{ ruby_version.stdout if ruby_version.stdout is defined else 'Failed' }}
+              4. Node.js: {{ nodejs_version.stdout if nodejs_version.stdout is defined else 'Failed' }}
+              5. Golang: {{ golang_version.stdout if golang_version.stdout is defined else 'Failed' }}
+      tags: ['verify']
+
+    - name: Display Success Message
+      debug:
+        msg: |
+          ✅ Programming Languages Configuration completed successfully!
+          
+          Installed Versions:
+          🔮 Erlang: {{ erlang_version.stdout }}
+          💜 Elixir: {{ elixir_version.stdout.split('\n')[0] }}
+          ♦️ Ruby: {{ ruby_version.stdout }}
+          🟩 Node.js: {{ nodejs_version.stdout }}
+          🦫 Golang: {{ golang_version.stdout }}
+          
+          Global tools installed:
+          - Elixir: hex
+          - Ruby: bundler
+          - Node.js: yarn, pnpm
+          - Golang: gopls (Go language server)
+          
+          Use 'mise exec <language>' to run commands with specific versions
+      tags: ['verify'] 
